@@ -181,7 +181,8 @@ img { display: block; max-width: 100%; }
 
 /* ------------------------------- hero ----------------------------------- */
 .hero {
-  margin: 22px 0;
+  margin-top: 22px;
+  margin-bottom: 22px;
   background: linear-gradient(120deg, #FFE7C2, #FFD6DE 60%, #E5D4FB);
   border-radius: var(--r-lg);
   padding: 48px 44px;
@@ -206,7 +207,7 @@ img { display: block; max-width: 100%; }
 .hero-cta { display: flex; gap: 12px; flex-wrap: wrap; }
 
 /* ------------------------------ sections -------------------------------- */
-.section { margin: 40px 0; }
+.section { margin-top: 40px; margin-bottom: 40px; }
 .section-head {
   display: flex; align-items: flex-end; justify-content: space-between;
   gap: 16px; margin-bottom: 18px; flex-wrap: wrap;
@@ -648,8 +649,6 @@ input[type="color"] {
   padding-top: 10px;
   border-top: 1px solid #eadfd2;
 }
-
-.section.container { padding-left: 16px; padding-right: 16px; }
 
 @media (max-width: 900px) {
   .how-grid { grid-template-columns: 1fr; }
