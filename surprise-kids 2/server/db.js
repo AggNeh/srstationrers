@@ -189,6 +189,10 @@ const products = {
     const id = nextId('product');
     let slug = slugify(input.name);
     if (cache.products.some((p) => p.slug === slug)) slug = `${slug}-${id}`;
+    // Normalize image/images: keep images[] as the source of truth,
+    // mirror images[0] into 'image' for back-compat readers (cart, card, etc).
+    let images = Array.isArray(input.images) ? input.images.filter(Boolean) : [];
+    if (!images.length && input.image) images = [input.image];
     const product = {
       id,
       slug,
@@ -197,8 +201,8 @@ const products = {
       price: Number(input.price) || 0,
       mrp: input.mrp != null ? Number(input.mrp) : null,
       categoryId: input.categoryId ? Number(input.categoryId) : null,
-      image: input.image || '',
-      images: Array.isArray(input.images) ? input.images : [],
+      image: images[0] || '',
+      images,
       inStock: input.inStock === undefined ? true : !!input.inStock,
       featured: !!input.featured,
       createdAt: new Date().toISOString(),
@@ -218,6 +222,15 @@ const products = {
       else if (f === 'categoryId') product[f] = patch[f] ? Number(patch[f]) : null;
       else if (f === 'inStock' || f === 'featured') product[f] = !!patch[f];
       else product[f] = patch[f];
+    }
+    // Re-normalize after patch: if images provided, image mirrors [0];
+    // if only image provided, images mirrors [image].
+    if (Array.isArray(patch.images)) {
+      product.images = patch.images.filter(Boolean);
+      product.image = product.images[0] || '';
+    } else if (patch.image !== undefined) {
+      product.image = patch.image || '';
+      product.images = product.image ? [product.image] : [];
     }
     persist();
     return withCategory(product);
