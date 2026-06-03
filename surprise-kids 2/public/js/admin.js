@@ -152,10 +152,10 @@ function productForm(p) {
     </div>
     <div class="field"><label>Description</label><textarea id="f-desc" rows="3">${esc(p ? p.description : '')}</textarea></div>
     <div class="field">
-      <label>Image</label>
-      <input id="f-image" value="${esc(p ? p.image : '')}" placeholder="/images/... or upload below — leave blank to auto-generate">
-      <input type="file" id="f-file" accept="image/*" style="margin-top:8px">
-      <div id="up-status" class="muted" style="font-size:.85rem">${isEdit ? '' : 'Tip: leave image blank to auto-generate one from the category.'}</div>
+      <label>Images</label>
+      <div class="muted" style="font-size:.85rem;margin-bottom:8px">${isEdit ? 'The first image is used as the product cover. Tap × to remove, tap "+ Add image" to upload more.' : 'Add one or more images. Leave empty to auto-generate one from the category.'}</div>
+      <div class="img-list" id="f-images"></div>
+      <div id="up-status" class="muted" style="font-size:.85rem;margin-top:6px"></div>
     </div>
     <div class="row2">
       <label class="checkbox"><input type="checkbox" id="f-stock" ${!p || p.inStock ? 'checked' : ''}> In stock</label>
@@ -167,6 +167,56 @@ function productForm(p) {
     </div>
   `);
 
+  // Per-form mutable image list. Seed from existing product.
+  const initialImages = (p && Array.isArray(p.images) && p.images.length)
+    ? [...p.images]
+    : (p && p.image ? [p.image] : []);
+  let images = [...initialImages];
+
+  function renderImages() {
+    const wrap = $('#f-images');
+    wrap.innerHTML = images.map((url, i) => `
+      <div class="img-thumb" draggable="true" data-i="${i}">
+        <img src="${esc(url)}" alt="">
+        ${i === 0 ? '<span class="thumb-cover">Cover</span>' : ''}
+        <button type="button" class="thumb-x" data-del="${i}" title="Remove">×</button>
+      </div>
+    `).join('') + `
+      <label class="img-add" title="Upload image">
+        <span>+ Add image</span>
+        <input type="file" id="f-image-file" accept="image/*" hidden>
+      </label>`;
+    $$('#f-images [data-del]').forEach(b => b.onclick = (ev) => {
+      ev.preventDefault();
+      images.splice(+b.dataset.del, 1);
+      renderImages();
+    });
+    // Click a thumb (not the × button) to make it the cover.
+    $$('#f-images .img-thumb').forEach(t => t.onclick = (ev) => {
+      if (ev.target.closest('.thumb-x')) return;
+      const i = +t.dataset.i;
+      if (i > 0) { const [img] = images.splice(i, 1); images.unshift(img); renderImages(); }
+    });
+    $('#f-image-file').onchange = uploadOne;
+  }
+
+  async function uploadOne(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    $('#up-status').textContent = 'Uploading…';
+    const fd = new FormData(); fd.append('image', file);
+    try {
+      const r = await fetch(`${API}/upload`, { method: 'POST', body: fd });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      images.push(d.url);
+      $('#up-status').textContent = '✓ Uploaded';
+      renderImages();
+    } catch (err) { $('#up-status').textContent = 'Upload failed: ' + err.message; }
+  }
+
+  renderImages();
+
   $('#f-newcat').onclick = () => {
     // Open the category form; when it saves, refresh CATS_CACHE and reselect the new one.
     categoryForm(null, async (created) => {
@@ -177,20 +227,6 @@ function productForm(p) {
     });
   };
 
-  $('#f-file').onchange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    $('#up-status').textContent = 'Uploading…';
-    const fd = new FormData(); fd.append('image', file);
-    try {
-      const r = await fetch(`${API}/upload`, { method: 'POST', body: fd });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error);
-      $('#f-image').value = d.url;
-      $('#up-status').textContent = '✓ Uploaded';
-    } catch (err) { $('#up-status').textContent = 'Upload failed: ' + err.message; }
-  };
-
   $('#f-cancel').onclick = closeModal;
   $('#f-save').onclick = async () => {
     const body = {
@@ -199,7 +235,7 @@ function productForm(p) {
       mrp: $('#f-mrp').value || null,
       categoryId: $('#f-cat').value,
       description: $('#f-desc').value.trim(),
-      image: $('#f-image').value.trim(),
+      images,
       inStock: $('#f-stock').checked,
       featured: $('#f-feat').checked,
     };
