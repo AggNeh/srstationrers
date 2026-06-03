@@ -12,10 +12,23 @@ function renderProduct(p) {
   document.title = `${p.name} · ${STORE.name}`;
   const off = discount(p.price, p.mrp);
   const root = $('#pdp-root');
+
+  // Image gallery: prefer images[] when present, fall back to single image.
+  const imgs = (Array.isArray(p.images) && p.images.length)
+    ? p.images
+    : (p.image ? [p.image] : []);
+  const main = imgs[0] || '';
+  const thumbs = imgs.length > 1
+    ? `<div class="pdp-thumbs">
+         ${imgs.map((u, i) => `<img class="pdp-thumb${i === 0 ? ' active' : ''}" src="${esc(u)}" data-i="${i}" alt="View ${i + 1}">`).join('')}
+       </div>`
+    : '';
+
   root.innerHTML = `
     <div class="pdp">
       <div class="pdp-media reveal">
-        <img src="${esc(p.image)}" alt="${esc(p.name)}">
+        <img id="pdp-main" src="${esc(main)}" alt="${esc(p.name)}">
+        ${thumbs}
       </div>
       <div class="pdp-info reveal" style="animation-delay:.08s">
         <div class="crumb"><a href="/">Home</a> ${p.category ? `· <a href="/category/${p.category.slug}">${esc(p.category.name)}</a>` : ''}</div>
@@ -46,6 +59,13 @@ function renderProduct(p) {
         </div>
       </div>
     </div>`;
+
+  // Wire thumbnail swap
+  $$('.pdp-thumb').forEach(t => t.onclick = () => {
+    $('#pdp-main').src = t.src;
+    $$('.pdp-thumb').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+  });
 
   if (p.inStock) {
     $('#inc').onclick = () => { qty++; $('#qv').textContent = qty; };
