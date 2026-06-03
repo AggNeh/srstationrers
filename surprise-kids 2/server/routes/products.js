@@ -36,11 +36,13 @@ router.post('/', (req, res) => {
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
   if (price === undefined || price === '') return res.status(400).json({ error: 'Price is required' });
   const created = db.products.create(req.body);
-  // If no image was provided, auto-generate one themed by the product's category.
-  if (!created.image) {
+  // If no image was provided (neither images[] nor image), auto-generate one
+  // themed by the product's category.
+  const hasImage = (Array.isArray(created.images) && created.images.length) || created.image;
+  if (!hasImage) {
     const cat = created.categoryId ? db.categories.byId(created.categoryId) : null;
     const url = writeProductImage(created.slug, created.name, cat || {});
-    return res.status(201).json(db.products.update(created.id, { image: url }));
+    return res.status(201).json(db.products.update(created.id, { images: [url] }));
   }
   res.status(201).json(created);
 });
