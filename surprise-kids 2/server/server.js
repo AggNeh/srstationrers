@@ -3,26 +3,34 @@ const cors = require('cors');
 const path = require('path');
 
 const { STORE, PORT } = require('./config');
+const db = require('./db');
 const productsRouter = require('./routes/products');
 const categoriesRouter = require('./routes/categories');
 const ordersRouter = require('./routes/orders');
 const uploadRouter = require('./routes/upload');
+const access = require('./routes/access');
 
 const app = express();
+const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-/* ------------------------------ admin auth ------------------------------
- * HTTP Basic Auth on every admin-only API endpoint:
- *   - POST/PUT/DELETE on /api/products  and  /api/categories
- *   - GET on /api/orders (the customer-facing POST /api/orders is left open
- *     so visitors can place orders without logging in)
- *   - PUT on /api/orders/.../status
- * Credentials come from env vars; defaults are safe-but-obvious so an
- * un-configured deployment refuses to look like a real store.
- */
+/* ------------------------------ cookie parser --------------------------- */
+// Minimal cookie parser — avoids pulling in the cookie-parser package.
+app.use((req, res, next) => {
+  const cookies = {};
+  const header = req.headers.cookie || '';
+  for (const part of header.split(';')) {
+    const [name, ...rest] = part.trim().split('=');
+    if (name) cookies[name] = decodeURIComponent(rest.join('=') || '');
+  }
+  req.cookies = cookies;
+  next();
+});
+
+/* ------------------------------ admin auth ------------------------------ */
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || 'changeme';
 
@@ -30,8 +38,6 @@ function timingSafeEqualStr(a, b) {
   const crypto = require('crypto');
   const A = Buffer.from(a, 'utf8');
   const B = Buffer.from(b, 'utf8');
-  // Pad to equal length so timingSafeEqual doesn't throw; result still
-  // differs when lengths differ because the underlying bytes won't match.
   const len = Math.max(A.length, B.length);
   const Ap = Buffer.alloc(len); A.copy(Ap);
   const Bp = Buffer.alloc(len); B.copy(Bp);
@@ -46,41 +52,78 @@ function checkBasicAuth(req) {
   try { decoded = Buffer.from(b64, 'base64').toString('utf8'); } catch (e) { return false; }
   const sep = decoded.indexOf(':');
   if (sep === -1) return false;
-  const u = decoded.slice(0, sep);
-  const p = decoded.slice(sep + 1);
-  return timingSafeEqualStr(u, ADMIN_USER) && timingSafeEqualStr(p, ADMIN_PASS);
+  return timingSafeEqualStr(decoded.slice(0, sep), ADMIN_USER)
+      && timingSafeEqualStr(decoded.slice(sep + 1), ADMIN_PASS);
 }
 
 function requireAdmin(req, res, next) {
   if (checkBasicAuth(req)) return next();
-  // No WWW-Authenticate header — that would trigger the browser's native
-  // ugly login dialog. Our admin page handles auth itself in JS.
   return res.status(401).json({ error: 'Auth required' });
 }
 
-// Endpoint used by the admin login form to verify credentials.
 app.get('/api/admin/check', requireAdmin, (req, res) => res.json({ ok: true }));
 
-// Apply auth to admin-only operations on the data routes.
+// Admin-only mutations
 app.use((req, res, next) => {
-  const p = req.path;
-  const m = req.method;
+  const p = req.path, m = req.method;
   let adminOnly = false;
-
-  // Products / categories: any write op needs admin.
   if (['POST', 'PUT', 'DELETE'].includes(m) && /^\/api\/(products|categories)(\/|$)/.test(p)) adminOnly = true;
-  // Generic image upload endpoint.
   if (m === 'POST' && /^\/api\/upload$/.test(p)) adminOnly = true;
-  // Orders: only LIST and STATUS update are admin. The single-order GET/PUT
-  // and the cancel endpoint are public but token-gated inside the route.
   if (m === 'GET'  && /^\/api\/orders\/?$/.test(p)) adminOnly = true;
   if (m === 'PUT'  && /^\/api\/orders\/[^/]+\/status$/.test(p)) adminOnly = true;
-
+  if (m === 'GET'  && /^\/api\/access\/code$/.test(p)) adminOnly = true;
+  if (m === 'PUT'  && /^\/api\/access\/code$/.test(p)) adminOnly = true;
   if (!adminOnly) return next();
   return requireAdmin(req, res, next);
 });
 
-// Expose public store config to the frontend (no secrets here)
+/* ----------------------------- access gate -----------------------------
+ * Site-wide gate the admin can rotate from the admin panel. A non-empty
+ * access code activates the gate; the customer must enter it once and a
+ * signed HttpOnly cookie is set. When the admin changes the code, all old
+ * cookies invalidate automatically because the cookie value is an HMAC of
+ * the current code.
+ *
+ * Bypassed:
+ *   - static assets (css/js/images, gate page itself, favicon)
+ *   - /admin HTML and /api/admin/* (admin uses Basic Auth)
+ *   - /api/config and /api/access/* (gate page and store name need these)
+ *   - any request that already carries valid admin Basic Auth
+ */
+function gateOpen(req) {
+  const p = req.path;
+  if (
+    p.startsWith('/css/') ||
+    p.startsWith('/js/') ||
+    p.startsWith('/images/') ||
+    p === '/favicon.ico' ||
+    p === '/gate.html' ||
+    p.startsWith('/api/access') ||
+    p.startsWith('/api/admin') ||
+    p === '/api/config' ||
+    p === '/api/health' ||
+    p === '/admin' ||
+    p.startsWith('/admin/')
+  ) return true;
+
+  if (checkBasicAuth(req)) return true;
+
+  const code = access.currentCode();
+  if (!code) return true; // gate disabled
+
+  const cookie = req.cookies.sr_access || '';
+  return cookie === access.cookieFor(code);
+}
+
+app.use((req, res, next) => {
+  if (gateOpen(req)) return next();
+  if (req.method === 'GET' && (req.headers.accept || '').includes('text/html')) {
+    return res.status(401).sendFile(path.join(PUBLIC_DIR, 'gate.html'));
+  }
+  return res.status(401).json({ error: 'Access code required', gated: true });
+});
+
+/* ------------------------------ public config --------------------------- */
 app.get('/api/config', (req, res) => {
   res.json({
     name: STORE.name,
@@ -95,6 +138,8 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+/* ------------------------------ API routers ----------------------------- */
+app.use('/api/access', access.router);
 app.use('/api/products', productsRouter);
 app.use('/api/categories', categoriesRouter);
 app.use('/api/orders', ordersRouter);
@@ -102,11 +147,9 @@ app.use('/api/upload', uploadRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
-// ----- static frontend -----
-const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+/* ------------------------------ static + pages -------------------------- */
 app.use(express.static(PUBLIC_DIR));
 
-// pretty routes -> serve the relevant HTML page (client-side handles the rest)
 app.get('/shop',              (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'shop.html')));
 app.get('/category/:slug',    (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'shop.html')));
 app.get('/product/:slug',     (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'product.html')));
@@ -115,7 +158,7 @@ app.get('/orders',            (req, res) => res.sendFile(path.join(PUBLIC_DIR, '
 app.get('/order/:ref',        (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'order.html')));
 app.get('/admin',             (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'admin.html')));
 
-// error handler (e.g. multer file-too-large / wrong type)
+/* ------------------------------ errors ---------------------------------- */
 app.use((err, req, res, next) => {
   console.error(err.message);
   res.status(400).json({ error: err.message || 'Something went wrong' });
