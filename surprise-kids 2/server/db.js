@@ -343,11 +343,27 @@ const orders = {
   },
 };
 
-/* ------------------------------ Bulk / seed ------------------------------ */
+/* ------------------------------ App config ------------------------------ */
 
+const config = {
+  get(key, fallback = null) {
+    const meta = cache.meta || {};
+    const conf = meta.config || {};
+    return conf[key] !== undefined ? conf[key] : fallback;
+  },
+  set(key, value) {
+    cache.meta = cache.meta || { seq: {} };
+    cache.meta.config = cache.meta.config || {};
+    cache.meta.config[key] = value;
+    persist();
+    return value;
+  },
+};
+
+/* ------------------------------ Bulk / seed ------------------------------ */
 function reset() {
   cache = JSON.parse(JSON.stringify(EMPTY));
   persist();
 }
 
-module.exports = { categories, products, orders, reset, persist, slugify, _raw: () => cache };
+module.exports = { categories, products, orders, config, reset, persist, slugify, _raw: () => cache };
