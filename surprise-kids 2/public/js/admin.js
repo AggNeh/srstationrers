@@ -64,6 +64,7 @@ function route(tab) {
   if (tab === 'products') viewProducts();
   if (tab === 'categories') viewCategories();
   if (tab === 'orders') viewOrders();
+  if (tab === 'access') viewAccess();
 }
 
 /* ------------------------------ dashboard ------------------------------- */
@@ -558,3 +559,98 @@ function closeModal() { $('#modal-root').innerHTML = ''; }
   $('#logout').onclick = () => { sessionStorage.removeItem(AUTH_KEY); location.reload(); };
   initAuth();
 })();
+
+/* ------------------------------ access code ----------------------------- */
+async function viewAccess() {
+  const view = $('#view');
+  view.innerHTML = '<p class="muted">Loading…</p>';
+  try {
+    const cur = await fetch(`${API}/access/code`).then(r => r.json());
+    renderAccess(cur);
+  } catch (e) {
+    view.innerHTML = '<p class="muted">Failed to load access code.</p>';
+  }
+}
+
+function renderAccess(cur) {
+  const view = $('#view');
+  const code = cur.code || '';
+  const gated = !!cur.gated;
+  const updated = cur.updatedAt ? new Date(cur.updatedAt).toLocaleString() : 'never';
+
+  view.innerHTML = `
+    <div class="section-head">
+      <div>
+        <div class="kicker">Storefront gate</div>
+        <h1>Access code</h1>
+      </div>
+      <span class="tag ${gated ? 'green' : ''}">${gated ? 'Gate ON' : 'Gate OFF'}</span>
+    </div>
+    <p class="muted">Visitors must enter this code before they can see the catalog. Rotate it daily and share with intended customers.</p>
+
+    <div class="access-card">
+      <div class="access-current">
+        <div class="muted" style="font-size:.85rem">Current code</div>
+        <div class="access-code" id="ac-code">${code ? esc(code) : '— gate disabled —'}</div>
+        <div class="muted" style="font-size:.8rem;margin-top:6px">Last changed: ${updated}</div>
+      </div>
+      <div class="access-actions">
+        <button class="btn btn-ghost btn-sm" id="ac-copy" ${code ? '' : 'disabled'}>📋 Copy code</button>
+        <button class="btn btn-ghost btn-sm" id="ac-wa" ${code ? '' : 'disabled'}>💬 Share on WhatsApp</button>
+      </div>
+    </div>
+
+    <div class="access-card">
+      <h3 style="margin-top:0">Set a new code</h3>
+      <p class="muted" style="font-size:.9rem">Pick any code — short numeric codes are easy to share over WhatsApp.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input id="ac-new" placeholder="e.g. 4821 or SR-MON" style="flex:1;min-width:200px;font-family:var(--display);letter-spacing:2px;text-transform:uppercase">
+        <button class="btn btn-ghost btn-sm" id="ac-random4">🎲 Random 4-digit</button>
+        <button class="btn btn-ghost btn-sm" id="ac-random6">🎲 Random 6-char</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+        <button class="btn btn-primary" id="ac-save">Save new code</button>
+        <button class="btn btn-ghost" id="ac-disable">Disable gate</button>
+      </div>
+      <p class="muted" style="font-size:.85rem;margin-top:10px">Heads up: changing the code instantly logs out every visitor who had the old one. They will need the new code to come back in.</p>
+    </div>
+  `;
+
+  $('#ac-copy').onclick = () => {
+    if (!code) return;
+    navigator.clipboard.writeText(code).then(() => toast('Code copied to clipboard'));
+  };
+  $('#ac-wa').onclick = () => {
+    if (!code || !STORE.whatsapp) return;
+    const msg = encodeURIComponent(`${STORE.name || 'Catalog'} access code for today: ${code}\n\nOpen: https://${location.host}/`);
+    window.open(`https://wa.me/?text=${msg}`, '_blank', 'noopener');
+  };
+  $('#ac-random4').onclick = () => {
+    $('#ac-new').value = Math.floor(1000 + Math.random() * 9000);
+  };
+  $('#ac-random6').onclick = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I,O,0,1 to avoid confusion
+    let s = ''; for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    $('#ac-new').value = s;
+  };
+  $('#ac-save').onclick = () => saveAccessCode($('#ac-new').value.trim());
+  $('#ac-disable').onclick = () => {
+    if (!confirm('Turn off the access gate? The storefront will be visible to anyone with the URL.')) return;
+    saveAccessCode('');
+  };
+  $('#ac-new').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveAccessCode($('#ac-new').value.trim()); });
+}
+
+async function saveAccessCode(newCode) {
+  try {
+    const r = await fetch(`${API}/access/code`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: newCode }),
+    });
+    const data = await r.json();
+    if (!r.ok) return toast(data.error || 'Save failed');
+    toast(newCode ? 'Access code updated' : 'Access gate disabled');
+    renderAccess(data);
+  } catch (e) { toast('Save failed: ' + e.message); }
+}
