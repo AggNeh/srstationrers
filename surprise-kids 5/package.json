@@ -1,0 +1,29 @@
+{
+  "name": "surprise-kids",
+  "version": "1.0.0",
+  "description": "SR Stationers - an online catalog store for kids' stationery, gifts and accessories (no payment gateway; orders are placed via WhatsApp enquiry).",
+  "main": "server/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node --watch server/server.js",
+    "seed": "node server/seed.js"
+  },
+  "keywords": [
+    "catalog",
+    "ecommerce",
+    "kids",
+    "stationery",
+    "express"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1062.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "mongodb": "^7.2.0",
+    "multer": "^1.4.5-lts.1",
+    "sharp": "^0.34.5"
+  }
+}
